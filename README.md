@@ -326,7 +326,7 @@ $env:MCFLY_KEY_SCHEME="vim"
 ```
 
 ### Fuzzy Searching
-To enable fuzzy searching, set `MCFLY_FUZZY` to `true`. Set it to `false` or unset it to disable fuzzy searching. You can also pass `--fuzzy` to `mcfly search`.
+To enable fuzzy searching, set `MCFLY_FUZZY` to `true`. Set it to `false` or unset it to disable fuzzy searching. Positive numeric values such as the previously supported `2` are also treated as enabled. You can also pass `--fuzzy` to `mcfly search`.
 
 bash / zsh:
 ```bash

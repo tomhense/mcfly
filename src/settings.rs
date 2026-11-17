@@ -396,10 +396,16 @@ impl Settings {
                 }
 
                 if let Ok(fuzzy) = env::var("MCFLY_FUZZY") {
-                    settings.fuzzy = matches!(
-                        fuzzy.to_ascii_lowercase().as_str(),
-                        "1" | "true" | "yes" | "on"
-                    );
+                    settings.fuzzy =
+                        fuzzy
+                            .parse::<i16>()
+                            .map(|value| value > 0)
+                            .unwrap_or_else(|_| {
+                                matches!(
+                                    fuzzy.to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            });
                 }
 
                 settings.fuzzy |= fuzzy;
