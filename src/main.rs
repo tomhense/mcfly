@@ -58,10 +58,25 @@ fn handle_search(settings: &Settings) {
                 out.push_str("mode display\n");
             }
 
-            // Next, the desired commandline selected by the user.
-            out.push_str("commandline ");
-            out.push_str(&cmd);
-            out.push('\n');
+            // Next, the desired commandline selected by the user. Keep the
+            // original one-line format for compatibility. The zsh integration
+            // uses a block for commands containing newlines so it can preserve them.
+            if matches!(
+                settings.history_format,
+                mcfly::settings::HistoryFormat::Zsh { .. }
+            ) && cmd.contains('\n')
+            {
+                out.push_str("commandline\n");
+                out.push_str(&cmd);
+                if !cmd.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str("__MCFLY_COMMANDLINE_END__\n");
+            } else {
+                out.push_str("commandline ");
+                out.push_str(&cmd);
+                out.push('\n');
+            }
 
             // Finally, any requests for deletion of commands from shell history, for cases where
             // shells need to handle this natively instead of through us editing HISTFILE/MCFLY_HISTFILE.

@@ -47,9 +47,17 @@
     # Write history to $MCFLY_HISTORY.
     fc -W "${MCFLY_HISTORY}"
 
-    # Run mcfly with the saved code. It find the text of the last command in $MCFLY_HISTORY and save it to the database.
+    # Ask zsh for the complete last history event. This preserves multiline
+    # commands as one command when zsh can provide it directly.
     [ -n "$MCFLY_DEBUG" ] && echo "mcfly.zsh: Run mcfly add --exit ${exit_code}"
-    $MCFLY_PATH --history_format $MCFLY_HISTORY_FORMAT add --exit ${exit_code}
+    local last_command
+    if [[ $HISTCMD -gt 1 ]] && last_command=${history[$((HISTCMD - 1))]} && [[ -n "$last_command" ]]; then
+      $MCFLY_PATH --history_format $MCFLY_HISTORY_FORMAT add --exit ${exit_code} -- "$last_command"
+    else
+      # Retain the history-file behavior as a fallback for shells/configurations
+      # where zsh cannot return the last history event directly.
+      $MCFLY_PATH --history_format $MCFLY_HISTORY_FORMAT add --exit ${exit_code}
+    fi
     return ${exit_code} # Restore the original exit code by returning it.
   }
 
@@ -83,7 +91,19 @@
       # Interpret commandline/run requests from McFly
       while read -r key val; do
         if [[ "$key" = "mode" ]]; then local mode="$val"; fi
-        if [[ "$key" = "commandline" ]]; then local commandline="$val"; fi
+        if [[ "$key" = "commandline" ]]; then
+          if [[ -n "$val" ]]; then
+            local commandline="$val"
+          else
+            local line
+            local commandline=""
+            while IFS= read -r line; do
+              [[ "$line" = "__MCFLY_COMMANDLINE_END__" ]] && break
+              [[ -n "$commandline" ]] && commandline+=$'\n'
+              commandline+="$line"
+            done
+          fi
+        fi
       done < "${mcfly_output}"
       command rm -f $mcfly_output
 
