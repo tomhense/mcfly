@@ -74,9 +74,9 @@ pub enum SubCommand {
         #[arg(value_name = "NUMBER", short, long)]
         results: Option<u16>,
 
-        /// Fuzzy-find results. 0 is off; higher numbers weight shorter/earlier matches more. Try 2
+        /// Fuzzy-find results
         #[arg(short, long)]
-        fuzzy: Option<i16>,
+        fuzzy: bool,
 
         /// Delete entry without confirm
         #[arg(long = "delete_without_confirm")]

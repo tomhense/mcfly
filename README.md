@@ -326,21 +326,21 @@ $env:MCFLY_KEY_SCHEME="vim"
 ```
 
 ### Fuzzy Searching
-To enable fuzzy searching, set `MCFLY_FUZZY` to an integer. 0 is off; higher numbers weight toward shorter matches. Values in the 2-5 range get good results so far; try a few and [report what works best for you](https://github.com/cantino/mcfly/issues/183)!
+To enable fuzzy searching, set `MCFLY_FUZZY` to `true`. Set it to `false` or unset it to disable fuzzy searching. Positive numeric values such as the previously supported `2` are also treated as enabled. You can also pass `--fuzzy` to `mcfly search`.
 
 bash / zsh:
 ```bash
-export MCFLY_FUZZY=2
+export MCFLY_FUZZY=true
 ```
 
 fish:
 ```bash
-set -gx MCFLY_FUZZY 2
+set -gx MCFLY_FUZZY true
 ```
 
 powershell:
 ```powershell
-$env:MCFLY_FUZZY=2
+$env:MCFLY_FUZZY="true"
 ```
 
 ### Results Count

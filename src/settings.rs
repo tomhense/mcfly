@@ -123,7 +123,7 @@ pub struct LightModeColors {
 pub struct Settings {
     pub mode: Mode,
     pub debug: bool,
-    pub fuzzy: i16,
+    pub fuzzy: bool,
     pub session_id: String,
     pub mcfly_history: PathBuf,
     pub output_selection: Option<String>,
@@ -177,7 +177,7 @@ impl Default for Settings {
             refresh_training_cache: false,
             append_to_histfile: None,
             debug: false,
-            fuzzy: 0,
+            fuzzy: false,
             lightmode: false,
             key_scheme: KeyScheme::Emacs,
             history_format: HistoryFormat::Bash,
@@ -397,16 +397,19 @@ impl Settings {
                 }
 
                 if let Ok(fuzzy) = env::var("MCFLY_FUZZY") {
-                    if let Ok(fuzzy) = i16::from_str(&fuzzy) {
-                        settings.fuzzy = fuzzy;
-                    } else if fuzzy.to_lowercase() != "false" {
-                        settings.fuzzy = 2;
-                    }
+                    settings.fuzzy =
+                        fuzzy
+                            .parse::<i16>()
+                            .map(|value| value > 0)
+                            .unwrap_or_else(|_| {
+                                matches!(
+                                    fuzzy.to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            });
                 }
 
-                if let Some(fuzzy) = fuzzy {
-                    settings.fuzzy = fuzzy;
-                }
+                settings.fuzzy |= fuzzy;
 
                 settings.delete_without_confirm =
                     delete_without_confirm || is_env_var_truthy("MCFLY_DELETE_WITHOUT_CONFIRM");

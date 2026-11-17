@@ -7,6 +7,8 @@ use crate::settings::{HistoryFormat, ResultFilter, ResultSort, Settings, TimeRan
 use crate::shell_history;
 use crate::simplified_command::SimplifiedCommand;
 use crate::time::to_datetime;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use itertools::Itertools;
 use regex::Regex;
 use rusqlite::named_params;
@@ -14,6 +16,7 @@ use rusqlite::types::ToSql;
 use rusqlite::{Connection, MappedRows, Row};
 use serde::{Serialize, Serializer};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -269,7 +272,7 @@ impl History {
         &self,
         cmd: &str,
         num: i16,
-        fuzzy: i16,
+        fuzzy: bool,
         result_sort: &ResultSort,
     ) -> Vec<Command> {
         let (wildcard, match_function, cmd) = if Self::is_case_sensitive(cmd) {
@@ -281,7 +284,7 @@ impl History {
 
         let mut like_query = wildcard.to_string();
 
-        if fuzzy > 0 {
+        if fuzzy {
             like_query.push_str(&cmd.split("").collect::<Vec<&str>>().join(wildcard));
         } else {
             like_query.push_str(&cmd);
@@ -303,8 +306,7 @@ impl History {
             FROM contextual_commands
             WHERE cmd",
             match_function,
-            "(:like)
-            ORDER BY",
+            "(:like)\n            ORDER BY",
             order_by_column,
             "DESC LIMIT :limit"
         )[..];
@@ -321,77 +323,73 @@ impl History {
                         .get(1)
                         .unwrap_or_else(|err| panic!("McFly error: cmd to be readable ({err})"));
 
-                    let bounds = Self::calc_match_indices(&text, &cmd, fuzzy);
+                    let bounds = Self::calc_match_indices(&text, &cmd);
 
                     Ok(Command {
-                        id: row.get(0).unwrap_or_else(|err| {
-                            panic!("McFly error: id to be readable ({err})")
+                    id: row
+                        .get(0)
+                        .unwrap_or_else(|err| panic!("McFly error: id to be readable ({err})")),
+                    cmd: text,
+                    cmd_tpl: row.get(2).unwrap_or_else(|err| {
+                        panic!("McFly error: cmd_tpl to be readable ({err})")
+                    }),
+                    session_id: row.get(3).unwrap_or_else(|err| {
+                        panic!("McFly error: session_id to be readable ({err})")
+                    }),
+                    when_run: row.get(4).unwrap_or_else(|err| {
+                        panic!("McFly error: when_run to be readable ({err})")
+                    }),
+                    exit_code: row.get(5).unwrap_or_else(|err| {
+                        panic!("McFly error: exit_code to be readable ({err})")
+                    }),
+                    selected: row.get(6).unwrap_or_else(|err| {
+                        panic!("McFly error: selected to be readable ({err})")
+                    }),
+                    dir: row
+                        .get(7)
+                        .unwrap_or_else(|err| panic!("McFly error: dir to be readable ({err})")),
+                    rank: row
+                        .get(8)
+                        .unwrap_or_else(|err| panic!("McFly error: rank to be readable ({err})")),
+                    match_indices: bounds,
+                    features: Features {
+                        age_factor: row.get(9).unwrap_or_else(|err| {
+                            panic!("McFly error: age_factor to be readable ({err})")
                         }),
-                        cmd: text,
-                        cmd_tpl: row.get(2).unwrap_or_else(|err| {
-                            panic!("McFly error: cmd_tpl to be readable ({err})")
+                        length_factor: row.get(10).unwrap_or_else(|err| {
+                            panic!("McFly error: length_factor to be readable ({err})")
                         }),
-                        session_id: row.get(3).unwrap_or_else(|err| {
-                            panic!("McFly error: session_id to be readable ({err})")
+                        exit_factor: row.get(11).unwrap_or_else(|err| {
+                            panic!("McFly error: exit_factor to be readable ({err})")
                         }),
-                        when_run: row.get(4).unwrap_or_else(|err| {
-                            panic!("McFly error: when_run to be readable ({err})")
+                        recent_failure_factor: row.get(12).unwrap_or_else(|err| {
+                            panic!("McFly error: recent_failure_factor to be readable ({err})")
                         }),
-                        exit_code: row.get(5).unwrap_or_else(|err| {
-                            panic!("McFly error: exit_code to be readable ({err})")
+                        selected_dir_factor: row.get(13).unwrap_or_else(|err| {
+                            panic!("McFly error: selected_dir_factor to be readable ({err})")
                         }),
-                        selected: row.get(6).unwrap_or_else(|err| {
-                            panic!("McFly error: selected to be readable ({err})")
+                        dir_factor: row.get(14).unwrap_or_else(|err| {
+                            panic!("McFly error: dir_factor to be readable ({err})")
                         }),
-                        dir: row.get(7).unwrap_or_else(|err| {
-                            panic!("McFly error: dir to be readable ({err})")
+                        overlap_factor: row.get(15).unwrap_or_else(|err| {
+                            panic!("McFly error: overlap_factor to be readable ({err})")
                         }),
-                        rank: row.get(8).unwrap_or_else(|err| {
-                            panic!("McFly error: rank to be readable ({err})")
+                        immediate_overlap_factor: row.get(16).unwrap_or_else(|err| {
+                            panic!("McFly error: immediate_overlap_factor to be readable ({err})")
                         }),
-                        match_indices: bounds,
-                        features: Features {
-                            age_factor: row.get(9).unwrap_or_else(|err| {
-                                panic!("McFly error: age_factor to be readable ({err})")
-                            }),
-                            length_factor: row.get(10).unwrap_or_else(|err| {
-                                panic!("McFly error: length_factor to be readable ({err})")
-                            }),
-                            exit_factor: row.get(11).unwrap_or_else(|err| {
-                                panic!("McFly error: exit_factor to be readable ({err})")
-                            }),
-                            recent_failure_factor: row.get(12).unwrap_or_else(|err| {
-                                panic!(
-                                    "McFly error: recent_failure_factor to be readable ({err})"
-                                )
-                            }),
-                            selected_dir_factor: row.get(13).unwrap_or_else(|err| {
-                                panic!("McFly error: selected_dir_factor to be readable ({err})")
-                            }),
-                            dir_factor: row.get(14).unwrap_or_else(|err| {
-                                panic!("McFly error: dir_factor to be readable ({err})")
-                            }),
-                            overlap_factor: row.get(15).unwrap_or_else(|err| {
-                                panic!("McFly error: overlap_factor to be readable ({err})")
-                            }),
-                            immediate_overlap_factor: row.get(16).unwrap_or_else(|err| {
-                                panic!(
-                                    "McFly error: immediate_overlap_factor to be readable ({err})"
-                                )
-                            }),
-                            selected_occurrences_factor: row.get(17).unwrap_or_else(|err| {
-                                panic!(
-                                    "McFly error: selected_occurrences_factor to be readable ({err})"
-                                )
-                            }),
-                            occurrences_factor: row.get(18).unwrap_or_else(|err| {
-                                panic!("McFly error: occurrences_factor to be readable ({err})")
-                            }),
-                        },
-                        last_run: row.get(19).unwrap_or_else(|err| {
-                            panic!("McFly error: last_run to be readable ({err})")
+                        selected_occurrences_factor: row.get(17).unwrap_or_else(|err| {
+                            panic!(
+                                "McFly error: selected_occurrences_factor to be readable ({err})"
+                            )
                         }),
-                    })
+                        occurrences_factor: row.get(18).unwrap_or_else(|err| {
+                            panic!("McFly error: occurrences_factor to be readable ({err})")
+                        }),
+                    },
+                    last_run: row.get(19).unwrap_or_else(|err| {
+                        panic!("McFly error: last_run to be readable ({err})")
+                    }),
+                })
                 },
             )
             .unwrap_or_else(|err| panic!("McFly error: Query Map to work ({err})"));
@@ -403,46 +401,67 @@ impl History {
             }));
         }
 
-        if fuzzy > 0 && result_sort != &ResultSort::LastRun {
+        let mut fuzzy_scores = HashMap::new();
+        if fuzzy {
+            let matcher = SkimMatcherV2::default();
+
+            names = names
+                .into_iter()
+                .filter_map(|mut command| {
+                    let (score, indices) = matcher.fuzzy_indices(&command.cmd, &cmd)?;
+
+                    fuzzy_scores.insert(command.id, score);
+
+                    // fuzzy-matcher reports character offsets; the renderer
+                    // walks the original UTF-8 string using byte offsets.
+                    command.match_indices = indices
+                        .into_iter()
+                        .filter_map(|index| command.cmd.char_indices().nth(index).map(|(i, _)| i))
+                        .collect();
+                    Some(command)
+                })
+                .collect();
+        }
+
+        if fuzzy && result_sort != &ResultSort::LastRun {
             names = names
                 .into_iter()
                 .sorted_unstable_by(|a, b| {
-                    // Fuzzy matches impose new ordering criteria on top of the
-                    // natural rank-based sorting: at the most basic level,
-                    // shorter and earlier matches are more likely to be
-                    // desired than longer or later matches -- even if they are
-                    // ranked a little lower.
-                    //
-                    // Each match is weighted by the inverse of its length plus
-                    // start position, relative to the total length + start of
-                    // both matches added together. This yields two complements
-                    // which always add up to 1 (e.g. 0.6 vs 0.4). If both
-                    // matches have the same length and start position, or if
-                    // those balance out exactly, the resulting weights will
-                    // both equal 0.5.
-                    //
-                    // The weights are multiplied by the configurable fuzzy
-                    // factor before being added to each result's original
-                    // rank. Factors > 1 are a "thumb on the scale" increasing
-                    // the likelihood of the weight flipping the outcome for
-                    // the originally lower-ranked result.
+                    // Skim's score captures adjacency, word boundaries,
+                    // leading characters, and gaps more accurately than the
+                    // former position-only heuristic.
+                    let a_score = fuzzy_scores.get(&a.id);
+                    let b_score = fuzzy_scores.get(&b.id);
 
-                    let a_start = *a.match_indices.first().unwrap_or(&0);
-                    let b_start = *b.match_indices.first().unwrap_or(&0);
+                    b_score.cmp(&a_score).then_with(|| {
+                        // Fuzzy matches impose new ordering criteria on top of the
+                        // natural rank-based sorting: at the most basic level,
+                        // shorter and earlier matches are more likely to be
+                        // desired than longer or later matches -- even if they are
+                        // ranked a little lower.
+                        //
+                        // Each match is weighted by the inverse of its length plus
+                        // start position, relative to the total length + start of
+                        // both matches added together. This yields two complements
+                        // which always add up to 1 (e.g. 0.6 vs 0.4). If both
+                        // matches have the same length and start position, or if
+                        // those balance out exactly, the resulting weights will
+                        // both equal 0.5.
+                        //
+                        let a_start = *a.match_indices.first().unwrap_or(&0);
+                        let b_start = *b.match_indices.first().unwrap_or(&0);
 
-                    let a_len = a.match_indices.last().map(|i| i + 1).unwrap_or(0) - a_start;
-                    let b_len = b.match_indices.last().map(|i| i + 1).unwrap_or(0) - b_start;
+                        let a_len = a.match_indices.last().map(|i| i + 1).unwrap_or(0) - a_start;
+                        let b_len = b.match_indices.last().map(|i| i + 1).unwrap_or(0) - b_start;
 
-                    let a_mod =
-                        1.0 - (a_start + a_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
-                    let b_mod =
-                        1.0 - (b_start + b_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
+                        let a_mod = 1.0
+                            - (a_start + a_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
+                        let b_mod = 1.0
+                            - (b_start + b_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
 
-                    PartialOrd::partial_cmp(
-                        &(b.rank + b_mod * f64::from(fuzzy)),
-                        &(a.rank + a_mod * f64::from(fuzzy)),
-                    )
-                    .unwrap_or(Ordering::Equal)
+                        PartialOrd::partial_cmp(&(b.rank + b_mod), &(a.rank + a_mod))
+                            .unwrap_or(Ordering::Equal)
+                    })
                 })
                 .collect();
         }
@@ -455,37 +474,17 @@ impl History {
         cmd.chars().any(|c| c.is_uppercase())
     }
 
-    /// Calculate the indices of the matches in the text.
-    fn calc_match_indices(text: &str, cmd: &str, fuzzy: i16) -> Vec<usize> {
+    /// Calculate the indices of exact matches in the text.
+    fn calc_match_indices(text: &str, cmd: &str) -> Vec<usize> {
         let (text, cmd) = if Self::is_case_sensitive(cmd) {
             (text.to_string(), cmd.to_string())
         } else {
             (text.to_lowercase(), cmd.to_lowercase())
         };
 
-        match fuzzy {
-            0 => text
-                .match_indices(&cmd)
-                .flat_map(|(index, _)| index..index + cmd.len())
-                .collect(),
-            _ => {
-                let mut search_iter = cmd.chars().peekable();
-
-                text.match_indices(|c| {
-                    let next = search_iter.peek();
-
-                    if next.is_some() && next.unwrap() == &c {
-                        let _advance = search_iter.next();
-
-                        return true;
-                    }
-
-                    false
-                })
-                .map(|m| m.0)
-                .collect()
-            }
-        }
+        text.match_indices(&cmd)
+            .flat_map(|(index, matched)| index..index + matched.len())
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
