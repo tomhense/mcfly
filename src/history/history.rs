@@ -305,9 +305,7 @@ impl History {
             FROM contextual_commands
             WHERE cmd",
             match_function,
-            "(:like)
-            "
-            "ORDER BY",
+            "(:like)\n            ORDER BY",
             order_by_column,
             "DESC LIMIT :limit"
         )[..];
