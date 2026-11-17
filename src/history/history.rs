@@ -272,7 +272,7 @@ impl History {
         &self,
         cmd: &str,
         num: i16,
-        fuzzy: i16,
+        fuzzy: bool,
         result_sort: &ResultSort,
     ) -> Vec<Command> {
         let (wildcard, match_function, cmd) = if Self::is_case_sensitive(cmd) {
@@ -284,7 +284,7 @@ impl History {
 
         let mut like_query = wildcard.to_string();
 
-        if fuzzy > 0 {
+        if fuzzy {
             like_query.push_str(&cmd.split("").collect::<Vec<&str>>().join(wildcard));
         } else {
             like_query.push_str(&cmd);
@@ -402,7 +402,7 @@ impl History {
         }
 
         let mut fuzzy_scores = HashMap::new();
-        if fuzzy > 0 {
+        if fuzzy {
             let matcher = SkimMatcherV2::default();
 
             names = names
@@ -423,7 +423,7 @@ impl History {
                 .collect();
         }
 
-        if fuzzy > 0 && result_sort != &ResultSort::LastRun {
+        if fuzzy && result_sort != &ResultSort::LastRun {
             names = names
                 .into_iter()
                 .sorted_unstable_by(|a, b| {
@@ -448,12 +448,6 @@ impl History {
                         // those balance out exactly, the resulting weights will
                         // both equal 0.5.
                         //
-                        // The weights are multiplied by the configurable fuzzy
-                        // factor before being added to each result's original
-                        // rank. Factors > 1 are a "thumb on the scale" increasing
-                        // the likelihood of the weight flipping the outcome for
-                        // the originally lower-ranked result.
-
                         let a_start = *a.match_indices.first().unwrap_or(&0);
                         let b_start = *b.match_indices.first().unwrap_or(&0);
 
@@ -465,11 +459,8 @@ impl History {
                         let b_mod = 1.0
                             - (b_start + b_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
 
-                        PartialOrd::partial_cmp(
-                            &(b.rank + b_mod * f64::from(fuzzy)),
-                            &(a.rank + a_mod * f64::from(fuzzy)),
-                        )
-                        .unwrap_or(Ordering::Equal)
+                        PartialOrd::partial_cmp(&(b.rank + b_mod), &(a.rank + a_mod))
+                            .unwrap_or(Ordering::Equal)
                     })
                 })
                 .collect();
