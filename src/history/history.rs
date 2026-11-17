@@ -274,9 +274,7 @@ impl History {
         fuzzy: i16,
         result_sort: &ResultSort,
     ) -> Vec<Command> {
-        let (wildcard, match_function, cmd) = if fuzzy > 0 {
-            ("", "", cmd.to_string())
-        } else if Self::is_case_sensitive(cmd) {
+        let (wildcard, match_function, cmd) = if Self::is_case_sensitive(cmd) {
             // escape '*' with '[*]' and replace '%' with '*' for glob matching
             ("*", "GLOB", cmd.replace("*", "[*]").replace("%", "*"))
         } else {
@@ -285,7 +283,11 @@ impl History {
 
         let mut like_query = wildcard.to_string();
 
-        like_query.push_str(&cmd);
+        if fuzzy > 0 {
+            like_query.push_str(&cmd.split("").collect::<Vec<&str>>().join(wildcard));
+        } else {
+            like_query.push_str(&cmd);
+        }
 
         like_query += wildcard;
 
@@ -301,14 +303,11 @@ impl History {
                 selected_dir_factor, dir_factor, overlap_factor, immediate_overlap_factor,
                 selected_occurrences_factor, occurrences_factor, last_run
             FROM contextual_commands
-            WHERE",
-            if fuzzy > 0 {
-                "1 = 1".to_string()
-            } else {
-                format!("cmd {match_function} (:like)")
-            },
+            WHERE cmd",
+            match_function,
+            "(:like)
             "
-            ORDER BY",
+            "ORDER BY",
             order_by_column,
             "DESC LIMIT :limit"
         )[..];
@@ -317,23 +316,17 @@ impl History {
             .connection
             .prepare(query)
             .unwrap_or_else(|err| panic!("McFly error: Prepare to work ({err})"));
-        let query_params: Vec<(&str, &dyn ToSql)> = if fuzzy > 0 {
-            vec![(":limit", &-1i16 as &dyn ToSql)]
-        } else {
-            vec![
-                (":like", &like_query as &dyn ToSql),
-                (":limit", &num as &dyn ToSql),
-            ]
-        };
         let command_iter = statement
-            .query_map(query_params.as_slice(), |row| {
-                let text: String = row
-                    .get(1)
-                    .unwrap_or_else(|err| panic!("McFly error: cmd to be readable ({err})"));
+            .query_map(
+                named_params! { ":like": &like_query, ":limit": &num },
+                |row| {
+                    let text: String = row
+                        .get(1)
+                        .unwrap_or_else(|err| panic!("McFly error: cmd to be readable ({err})"));
 
-                let bounds = Self::calc_match_indices(&text, &cmd);
+                    let bounds = Self::calc_match_indices(&text, &cmd);
 
-                Ok(Command {
+                    Ok(Command {
                     id: row
                         .get(0)
                         .unwrap_or_else(|err| panic!("McFly error: id to be readable ({err})")),
@@ -398,7 +391,8 @@ impl History {
                         panic!("McFly error: last_run to be readable ({err})")
                     }),
                 })
-            })
+                },
+            )
             .unwrap_or_else(|err| panic!("McFly error: Query Map to work ({err})"));
 
         let mut names = Vec::new();
