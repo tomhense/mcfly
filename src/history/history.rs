@@ -16,6 +16,7 @@ use rusqlite::types::ToSql;
 use rusqlite::{Connection, MappedRows, Row};
 use serde::{Serialize, Serializer};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -400,13 +401,16 @@ impl History {
             }));
         }
 
+        let mut fuzzy_scores = HashMap::new();
         if fuzzy > 0 {
             let matcher = SkimMatcherV2::default();
 
             names = names
                 .into_iter()
                 .filter_map(|mut command| {
-                    let (_, indices) = matcher.fuzzy_indices(&command.cmd, &cmd)?;
+                    let (score, indices) = matcher.fuzzy_indices(&command.cmd, &cmd)?;
+
+                    fuzzy_scores.insert(command.id, score);
 
                     // fuzzy-matcher reports character offsets; the renderer
                     // walks the original UTF-8 string using byte offsets.
@@ -423,42 +427,50 @@ impl History {
             names = names
                 .into_iter()
                 .sorted_unstable_by(|a, b| {
-                    // Fuzzy matches impose new ordering criteria on top of the
-                    // natural rank-based sorting: at the most basic level,
-                    // shorter and earlier matches are more likely to be
-                    // desired than longer or later matches -- even if they are
-                    // ranked a little lower.
-                    //
-                    // Each match is weighted by the inverse of its length plus
-                    // start position, relative to the total length + start of
-                    // both matches added together. This yields two complements
-                    // which always add up to 1 (e.g. 0.6 vs 0.4). If both
-                    // matches have the same length and start position, or if
-                    // those balance out exactly, the resulting weights will
-                    // both equal 0.5.
-                    //
-                    // The weights are multiplied by the configurable fuzzy
-                    // factor before being added to each result's original
-                    // rank. Factors > 1 are a "thumb on the scale" increasing
-                    // the likelihood of the weight flipping the outcome for
-                    // the originally lower-ranked result.
+                    // Skim's score captures adjacency, word boundaries,
+                    // leading characters, and gaps more accurately than the
+                    // former position-only heuristic.
+                    let a_score = fuzzy_scores.get(&a.id);
+                    let b_score = fuzzy_scores.get(&b.id);
 
-                    let a_start = *a.match_indices.first().unwrap_or(&0);
-                    let b_start = *b.match_indices.first().unwrap_or(&0);
+                    b_score.cmp(&a_score).then_with(|| {
+                        // Fuzzy matches impose new ordering criteria on top of the
+                        // natural rank-based sorting: at the most basic level,
+                        // shorter and earlier matches are more likely to be
+                        // desired than longer or later matches -- even if they are
+                        // ranked a little lower.
+                        //
+                        // Each match is weighted by the inverse of its length plus
+                        // start position, relative to the total length + start of
+                        // both matches added together. This yields two complements
+                        // which always add up to 1 (e.g. 0.6 vs 0.4). If both
+                        // matches have the same length and start position, or if
+                        // those balance out exactly, the resulting weights will
+                        // both equal 0.5.
+                        //
+                        // The weights are multiplied by the configurable fuzzy
+                        // factor before being added to each result's original
+                        // rank. Factors > 1 are a "thumb on the scale" increasing
+                        // the likelihood of the weight flipping the outcome for
+                        // the originally lower-ranked result.
 
-                    let a_len = a.match_indices.last().map(|i| i + 1).unwrap_or(0) - a_start;
-                    let b_len = b.match_indices.last().map(|i| i + 1).unwrap_or(0) - b_start;
+                        let a_start = *a.match_indices.first().unwrap_or(&0);
+                        let b_start = *b.match_indices.first().unwrap_or(&0);
 
-                    let a_mod =
-                        1.0 - (a_start + a_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
-                    let b_mod =
-                        1.0 - (b_start + b_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
+                        let a_len = a.match_indices.last().map(|i| i + 1).unwrap_or(0) - a_start;
+                        let b_len = b.match_indices.last().map(|i| i + 1).unwrap_or(0) - b_start;
 
-                    PartialOrd::partial_cmp(
-                        &(b.rank + b_mod * f64::from(fuzzy)),
-                        &(a.rank + a_mod * f64::from(fuzzy)),
-                    )
-                    .unwrap_or(Ordering::Equal)
+                        let a_mod = 1.0
+                            - (a_start + a_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
+                        let b_mod = 1.0
+                            - (b_start + b_len) as f64 / (a_start + b_start + a_len + b_len) as f64;
+
+                        PartialOrd::partial_cmp(
+                            &(b.rank + b_mod * f64::from(fuzzy)),
+                            &(a.rank + a_mod * f64::from(fuzzy)),
+                        )
+                        .unwrap_or(Ordering::Equal)
+                    })
                 })
                 .collect();
         }
